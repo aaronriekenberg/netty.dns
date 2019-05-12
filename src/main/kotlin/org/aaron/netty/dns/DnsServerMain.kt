@@ -99,8 +99,8 @@ private data class PendingServerRequestInfo(
         val questionString: String,
         val expirationTime: Instant
 ) {
-    fun expired(): Boolean =
-            expirationTime.isBefore(Instant.now())
+    fun expired(now: Instant): Boolean =
+            expirationTime.isBefore(now)
 }
 
 private val idToPendingServerRequestInfo = ConcurrentHashMap<Int, PendingServerRequestInfo>()
@@ -109,8 +109,8 @@ private data class ResponseCacheObject(
         val answerARecord: DnsRawRecord,
         val expirationTime: Instant
 ) {
-    fun expired(): Boolean =
-            expirationTime.isBefore(Instant.now())
+    fun expired(now: Instant): Boolean =
+            expirationTime.isBefore(now)
 }
 
 private val questionStringToResponseCacheObject = ConcurrentHashMap<String, ResponseCacheObject>()
@@ -139,8 +139,10 @@ private object PeriodicTimer {
                     try {
                         logger.info { "begin timer pop pending requests = ${idToPendingServerRequestInfo.size} cache size = ${questionStringToResponseCacheObject.size}" }
 
-                        idToPendingServerRequestInfo.entries.removeIf { it.value.expired() }
-                        questionStringToResponseCacheObject.entries.removeIf { it.value.expired() }
+                        val now = Instant.now()
+
+                        idToPendingServerRequestInfo.entries.removeIf { it.value.expired(now) }
+                        questionStringToResponseCacheObject.entries.removeIf { it.value.expired(nnow) }
 
                         logger.info { "end timer pop pending requests = ${idToPendingServerRequestInfo.size} cache size = ${questionStringToResponseCacheObject.size}" }
                         logger.info { "metrics = $metrics" }
