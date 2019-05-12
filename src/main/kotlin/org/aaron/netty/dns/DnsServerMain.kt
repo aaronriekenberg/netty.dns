@@ -142,7 +142,7 @@ private object PeriodicTimer {
                         val now = Instant.now()
 
                         idToPendingServerRequestInfo.entries.removeIf { it.value.expired(now) }
-                        questionStringToResponseCacheObject.entries.removeIf { it.value.expired(nnow) }
+                        questionStringToResponseCacheObject.entries.removeIf { it.value.expired(now) }
 
                         logger.info { "end timer pop pending requests = ${idToPendingServerRequestInfo.size} cache size = ${questionStringToResponseCacheObject.size}" }
                         logger.info { "metrics = $metrics" }
