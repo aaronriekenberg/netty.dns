@@ -154,26 +154,19 @@ private object PeriodicTimer {
 private class IncomingDNSQueryHandler() : SimpleChannelInboundHandler<DatagramDnsQuery>() {
 
     override fun channelRead0(ctx: ChannelHandlerContext, incomingMessage: DatagramDnsQuery) {
-        logger.info { "IncomingDNSQueryHandler.channelRead0 content = $incomingMessage" }
-
-        logger.info { "id = ${incomingMessage.id()}" }
-        logger.info { "opCode = ${incomingMessage.opCode()}" }
-        logger.info { "isRecursionDesired = ${incomingMessage.isRecursionDesired}" }
+        logger.debug { "IncomingDNSQueryHandler.channelRead0 content = $incomingMessage" }
 
         val questionCount = incomingMessage.count(DnsSection.QUESTION)
-        logger.info { "question count = $questionCount" }
+        logger.debug { "question count = $questionCount" }
 
         val question = incomingMessage.recordAt<DefaultDnsQuestion>(DnsSection.QUESTION)
-        logger.info { "question = $question" }
+        logger.debug { "question = $question" }
 
         if (question != null) {
-            logger.info { "question.name = ${question.name()}" }
-            logger.info { "question.dnsClass = ${question.dnsClass()}" }
-            logger.info { "question.type = ${question.type()}" }
 
             val responseCacheObject = questionStringToResponseCacheObject[question.toString()]
             if (responseCacheObject != null) {
-                logger.info { "cache hit" }
+                logger.debug { "cache hit" }
 
                 metrics.cacheHits.incrementAndGet()
 
@@ -199,7 +192,7 @@ private class IncomingDNSQueryHandler() : SimpleChannelInboundHandler<DatagramDn
                 dnsServerChannel.writeAndFlush(response)
 
             } else {
-                logger.info { "cache miss" }
+                logger.debug { "cache miss" }
 
                 metrics.cacheMisses.incrementAndGet()
 
@@ -213,7 +206,7 @@ private class IncomingDNSQueryHandler() : SimpleChannelInboundHandler<DatagramDn
                 )
                 idToPendingServerRequestInfo[outgoingID] = pendingServerRequestInfo
 
-                logger.info { "saved outgoingID = $outgoingID pendingServerRequestInfo = $pendingServerRequestInfo " }
+                logger.debug { "saved outgoingID = $outgoingID pendingServerRequestInfo = $pendingServerRequestInfo " }
 
                 if (question.type() == DnsRecordType.A) {
                     val outgoingRequest = DatagramDnsQuery(outgoingDatagramChannelLocalAddress, outgoingServerAddress, outgoingID, incomingMessage.opCode())
@@ -245,24 +238,22 @@ private class IncomingDNSQueryHandler() : SimpleChannelInboundHandler<DatagramDn
 private class OutgoingRawDNSResponseHandler : SimpleChannelInboundHandler<DatagramPacket>() {
 
     override fun channelRead0(ctx: ChannelHandlerContext, dnsResponse: DatagramPacket) {
-        logger.info { "OutgoingRawDNSResponseHandler.dnsResponse = $dnsResponse" }
+        logger.debug { "OutgoingRawDNSResponseHandler.dnsResponse = $dnsResponse" }
 
         val dnsResponseBuffer = dnsResponse.content()
         dnsResponseBuffer.markReaderIndex()
         val incomingResponseID = dnsResponseBuffer.readUnsignedShort()
         dnsResponseBuffer.resetReaderIndex()
-        logger.info { "incomingResponseID = $incomingResponseID" }
+        logger.debug { "incomingResponseID = $incomingResponseID" }
 
         val pendingRequestInfo = idToPendingServerRequestInfo.remove(incomingResponseID)
-        logger.info { "pendingRequestInfo = $pendingRequestInfo" }
+        logger.debug { "pendingRequestInfo = $pendingRequestInfo" }
 
         if (pendingRequestInfo != null) {
             dnsResponseBuffer.setShort(0, pendingRequestInfo.incomingID)
 
             val outputPacket = DatagramPacket(dnsResponseBuffer.retainedDuplicate(), pendingRequestInfo.clientAddress)
-            logger.info { "pipeline names = ${dnsServerChannel.pipeline().names()}" }
             dnsServerChannel.pipeline().context(DatagramDnsResponseEncoder::class.java).writeAndFlush(outputPacket)
-            logger.info { "wrote outputPacket" }
 
             metrics.rawResponses.incrementAndGet()
         }
@@ -276,21 +267,20 @@ private class OutgoingRawDNSResponseHandler : SimpleChannelInboundHandler<Datagr
 private class OutgoingDNSResponseHandler : SimpleChannelInboundHandler<DatagramDnsResponse>() {
 
     override fun channelRead0(ctx: ChannelHandlerContext, dnsResponse: DatagramDnsResponse) {
-        logger.info { "OutgoingDNSResponseHandler.channelRead0 dnsResponse = $dnsResponse" }
+        logger.debug { "OutgoingDNSResponseHandler.channelRead0 dnsResponse = $dnsResponse" }
 
         val responseCode = dnsResponse.code()
-        logger.info { "channelRead0 responseCode = $responseCode" }
+        logger.debug { "channelRead0 responseCode = $responseCode" }
 
         val questionSection = dnsResponse.recordAt<DnsRecord>(DnsSection.QUESTION) as? DefaultDnsQuestion
-        logger.info { "questionSection = $questionSection" }
+        logger.debug { "questionSection = $questionSection" }
 
         val answerCount = dnsResponse.count(DnsSection.ANSWER)
-        logger.info { "answerCount = $answerCount" }
-        logger.info { "count = ${dnsResponse.count()}" }
+        logger.debug { "answerCount = $answerCount" }
 
         val id = dnsResponse.id()
         val pendingRequestInfo = idToPendingServerRequestInfo.remove(id)
-        logger.info { "pendingRequestInfo = $pendingRequestInfo" }
+        logger.debug { "pendingRequestInfo = $pendingRequestInfo" }
 
         if (pendingRequestInfo != null) {
             val response = DatagramDnsResponse(dnsServerAddress, pendingRequestInfo.clientAddress, pendingRequestInfo.incomingID)
@@ -305,7 +295,6 @@ private class OutgoingDNSResponseHandler : SimpleChannelInboundHandler<DatagramD
             var answerARecord: DefaultDnsRawRecord? = null
             for (i in 0 until answerCount) {
                 val answer = dnsResponse.recordAt<DnsRecord>(DnsSection.ANSWER, i) as? DefaultDnsRawRecord
-                logger.info { "i=$i answer=$answer" }
                 if ((answer != null) && (answer.type() == DnsRecordType.A)) {
                     answerARecord = DefaultDnsRawRecord(
                             answer.name(), answer.type(), answer.dnsClass(),
@@ -314,20 +303,16 @@ private class OutgoingDNSResponseHandler : SimpleChannelInboundHandler<DatagramD
                     break
                 }
             }
-            logger.info { "response.count(ANSWER) = ${response.count(DnsSection.ANSWER)}" }
-            logger.info { "response.count() = ${response.count()}" }
-            logger.info { "sending response $response" }
-            logger.info { "sending answerARecord $answerARecord ttl = ${answerARecord?.timeToLive()}" }
+            logger.debug { "answerARecord = $answerARecord" }
 
             if ((responseCode == DnsResponseCode.NOERROR) && (answerARecord != null)) {
                 val expirationTime = Instant.now().plusSeconds(answerARecord.timeToLive())
-                logger.info { "expirationTime = $expirationTime" }
                 val responseCacheObject = ResponseCacheObject(
                         answerARecord = answerARecord.copy(),
                         expirationTime = expirationTime
                 )
                 questionStringToResponseCacheObject[pendingRequestInfo.questionString] = responseCacheObject
-                logger.info { "added to cache questionString = ${pendingRequestInfo.questionString} responseCacheObject = $responseCacheObject" }
+                logger.debug { "added to cache questionString = ${pendingRequestInfo.questionString} responseCacheObject = $responseCacheObject" }
 
                 metrics.cacheableResponses.incrementAndGet()
             } else {
