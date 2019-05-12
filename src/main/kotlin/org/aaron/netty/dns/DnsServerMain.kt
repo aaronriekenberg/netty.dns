@@ -55,7 +55,6 @@ private val outgoingRawDatagramChannel = Bootstrap()
             override fun initChannel(datagramChannel: DatagramChannel) {
                 datagramChannel.pipeline().addLast(LoggingHandler(LogLevel.DEBUG))
                 datagramChannel.pipeline().addLast(DatagramDnsQueryEncoder())
-                //   datagramChannel.pipeline().addLast(DatagramDnsResponseDecoder())
                 datagramChannel.pipeline().addLast(OutgoingRawDNSResponseHandler())
             }
         }).bind(0).sync().channel()!!
