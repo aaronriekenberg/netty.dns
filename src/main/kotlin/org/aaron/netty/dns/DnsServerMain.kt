@@ -111,11 +111,19 @@ private data class ResponseCacheObject(
     fun expired(now: Instant): Boolean =
             expirationTime.isBefore(now)
 
-    fun retain(): ResponseCacheObject =
+    @Synchronized
+    fun retain(): ResponseCacheObject? {
+        return if (answerARecord.refCnt() <= 0) {
+            null
+        } else {
             copy(answerARecord = answerARecord.retain())
+        }
+    }
 
-    fun release(): Boolean =
-            answerARecord.release()
+    @Synchronized
+    fun release(): Boolean {
+        return answerARecord.release()
+    }
 
 }
 
