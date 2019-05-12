@@ -18,7 +18,6 @@ import io.netty.channel.socket.nio.NioDatagramChannel
 import io.netty.handler.codec.dns.*
 import io.netty.handler.logging.LogLevel
 import io.netty.handler.logging.LoggingHandler
-import io.netty.util.ReferenceCountUtil
 import mu.KotlinLogging
 import java.net.InetSocketAddress
 import java.time.Instant
@@ -112,9 +111,8 @@ private data class ResponseCacheObject(
     fun expired(now: Instant): Boolean =
             expirationTime.isBefore(now)
 
-    fun retain(): ResponseCacheObject = copy(
-            answerARecord = answerARecord.retain(),
-            expirationTime = expirationTime)
+    fun retain(): ResponseCacheObject =
+            copy(answerARecord = answerARecord.retain())
 
     fun release(): Boolean =
             answerARecord.release()
