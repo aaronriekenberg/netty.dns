@@ -18,6 +18,7 @@ import io.netty.channel.socket.nio.NioDatagramChannel
 import io.netty.handler.codec.dns.*
 import io.netty.handler.logging.LogLevel
 import io.netty.handler.logging.LoggingHandler
+import io.netty.util.ReferenceCountUtil
 import mu.KotlinLogging
 import java.net.InetSocketAddress
 import java.time.Instant
@@ -111,6 +112,14 @@ private data class ResponseCacheObject(
 ) {
     fun expired(now: Instant): Boolean =
             expirationTime.isBefore(now)
+
+    fun retain(): ResponseCacheObject = ResponseCacheObject(
+            answerARecord = answerARecord.retain(),
+            expirationTime = expirationTime)
+
+    fun release(): Boolean =
+            ReferenceCountUtil.release(answerARecord)
+
 }
 
 private val questionStringToResponseCacheObject = ConcurrentHashMap<String, ResponseCacheObject>()
@@ -142,7 +151,13 @@ private object PeriodicTimer {
                         val now = Instant.now()
 
                         idToPendingServerRequestInfo.entries.removeIf { it.value.expired(now) }
-                        questionStringToResponseCacheObject.entries.removeIf { it.value.expired(now) }
+
+                        questionStringToResponseCacheObject.entries
+                                .filter { it.value.expired(now) }
+                                .forEach {
+                                    questionStringToResponseCacheObject.remove(it.key)
+                                    it.value.release()
+                                }
 
                         logger.info { "end timer pop pending requests = ${idToPendingServerRequestInfo.size} cache size = ${questionStringToResponseCacheObject.size}" }
                         logger.info { "metrics = $metrics" }
@@ -166,32 +181,37 @@ private class IncomingDNSQueryHandler() : SimpleChannelInboundHandler<DatagramDn
 
         if (question != null) {
 
-            val responseCacheObject = questionStringToResponseCacheObject[question.toString()]
+            val responseCacheObject = questionStringToResponseCacheObject[question.toString()]?.retain()
             if (responseCacheObject != null) {
-                logger.debug { "cache hit" }
+                try {
+                    logger.debug { "cache hit" }
 
-                metrics.cacheHits.incrementAndGet()
+                    metrics.cacheHits.incrementAndGet()
 
-                val response = DatagramDnsResponse(dnsServerAddress, incomingMessage.sender(), incomingMessage.id())
-                response.setRecursionAvailable(true)
-                response.setRecursionDesired(true)
-                response.setTruncated(false)
-                response.setZ(incomingMessage.z())
-                response.setCode(DnsResponseCode.NOERROR)
-                response.setRecord(DnsSection.QUESTION, question)
+                    val response = DatagramDnsResponse(dnsServerAddress, incomingMessage.sender(), incomingMessage.id())
+                    response.setRecursionAvailable(true)
+                    response.setRecursionDesired(true)
+                    response.setTruncated(false)
+                    response.setZ(incomingMessage.z())
+                    response.setCode(DnsResponseCode.NOERROR)
+                    response.setRecord(DnsSection.QUESTION, question)
 
-                val ttlSeconds = max(responseCacheObject.expirationTime.epochSecond - Instant.now().epochSecond, 0)
+                    val ttlSeconds = max(responseCacheObject.expirationTime.epochSecond - Instant.now().epochSecond, 0)
 
-                val answerCopy = DefaultDnsRawRecord(
-                        responseCacheObject.answerARecord.name(),
-                        responseCacheObject.answerARecord.type(),
-                        responseCacheObject.answerARecord.dnsClass(),
-                        ttlSeconds,
-                        responseCacheObject.answerARecord.content().copy())
+                    val answerCopy = DefaultDnsRawRecord(
+                            responseCacheObject.answerARecord.name(),
+                            responseCacheObject.answerARecord.type(),
+                            responseCacheObject.answerARecord.dnsClass(),
+                            ttlSeconds,
+                            responseCacheObject.answerARecord.content().copy())
 
-                response.addRecord(DnsSection.ANSWER, answerCopy)
+                    response.addRecord(DnsSection.ANSWER, answerCopy)
 
-                dnsServerChannel.writeAndFlush(response)
+                    dnsServerChannel.writeAndFlush(response)
+
+                } finally {
+                    ReferenceCountUtil.release(responseCacheObject)
+                }
 
             } else {
                 logger.debug { "cache miss" }
