@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlin.reflect.KClass
 
@@ -99,7 +100,7 @@ private data class PendingServerRequestInfo(
         val expirationTime: Instant
 ) {
     fun expired(): Boolean =
-                expirationTime.isBefore(Instant.now())
+            expirationTime.isBefore(Instant.now())
 }
 
 private val idToPendingServerRequestInfo = ConcurrentHashMap<Int, PendingServerRequestInfo>()
@@ -116,6 +117,18 @@ private val questionStringToResponseCacheObject = ConcurrentHashMap<String, Resp
 
 private const val minTTLSeconds: Long = 300
 
+private data class Metrics(
+        val cacheHits: AtomicLong = AtomicLong(0),
+        val cacheMisses: AtomicLong = AtomicLong(0),
+        val nonRawUpstreamRequets: AtomicLong = AtomicLong(0),
+        val rawUpstreamRequests: AtomicLong = AtomicLong(0),
+        val rawResponses: AtomicLong = AtomicLong(0),
+        val cacheableResponses: AtomicLong = AtomicLong(0),
+        val nonCacheableResponses: AtomicLong = AtomicLong(0)
+)
+
+private val metrics = Metrics()
+
 private object PeriodicTimer {
     private val scheduler = Executors.newSingleThreadScheduledExecutor()!!
 
@@ -130,7 +143,7 @@ private object PeriodicTimer {
                         questionStringToResponseCacheObject.entries.removeIf { it.value.expired() }
 
                         logger.info { "end timer pop pending requests = ${idToPendingServerRequestInfo.size} cache size = ${questionStringToResponseCacheObject.size}" }
-
+                        logger.info { "metrics = $metrics" }
                     } catch (e: Exception) {
                         logger.warn(e) { "timer pop" }
                     }
@@ -162,6 +175,8 @@ private class IncomingDNSQueryHandler() : SimpleChannelInboundHandler<DatagramDn
             if (responseCacheObject != null) {
                 logger.info { "cache hit" }
 
+                metrics.cacheHits.incrementAndGet()
+
                 val response = DatagramDnsResponse(dnsServerAddress, incomingMessage.sender(), incomingMessage.id())
                 response.setRecursionAvailable(true)
                 response.setRecursionDesired(true)
@@ -186,6 +201,8 @@ private class IncomingDNSQueryHandler() : SimpleChannelInboundHandler<DatagramDn
             } else {
                 logger.info { "cache miss" }
 
+                metrics.cacheMisses.incrementAndGet()
+
                 val outgoingID = ThreadLocalRandom.current().nextInt(1, 65536)
 
                 val pendingServerRequestInfo = PendingServerRequestInfo(
@@ -204,12 +221,16 @@ private class IncomingDNSQueryHandler() : SimpleChannelInboundHandler<DatagramDn
                     outgoingRequest.setZ(incomingMessage.z())
                     outgoingRequest.addRecord(DnsSection.QUESTION, question)
                     outgoingDatagramChannel.writeAndFlush(outgoingRequest)
+
+                    metrics.nonRawUpstreamRequets.incrementAndGet()
                 } else {
                     val outgoingRequest = DatagramDnsQuery(outgoingRawDatagramChannelLocalAddress, outgoingServerAddress, outgoingID, incomingMessage.opCode())
                     outgoingRequest.isRecursionDesired = incomingMessage.isRecursionDesired
                     outgoingRequest.setZ(incomingMessage.z())
                     outgoingRequest.addRecord(DnsSection.QUESTION, question)
                     outgoingRawDatagramChannel.writeAndFlush(outgoingRequest)
+
+                    metrics.rawUpstreamRequests.incrementAndGet()
                 }
 
             }
@@ -242,6 +263,8 @@ private class OutgoingRawDNSResponseHandler : SimpleChannelInboundHandler<Datagr
             logger.info { "pipeline names = ${dnsServerChannel.pipeline().names()}" }
             dnsServerChannel.pipeline().context(DatagramDnsResponseEncoder::class.java).writeAndFlush(outputPacket)
             logger.info { "wrote outputPacket" }
+
+            metrics.rawResponses.incrementAndGet()
         }
     }
 
@@ -305,6 +328,10 @@ private class OutgoingDNSResponseHandler : SimpleChannelInboundHandler<DatagramD
                 )
                 questionStringToResponseCacheObject[pendingRequestInfo.questionString] = responseCacheObject
                 logger.info { "added to cache questionString = ${pendingRequestInfo.questionString} responseCacheObject = $responseCacheObject" }
+
+                metrics.cacheableResponses.incrementAndGet()
+            } else {
+                metrics.nonCacheableResponses.incrementAndGet()
             }
 
             dnsServerChannel.writeAndFlush(response)
