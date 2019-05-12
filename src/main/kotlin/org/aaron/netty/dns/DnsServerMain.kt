@@ -112,7 +112,7 @@ private data class ResponseCacheObject(
     fun expired(now: Instant): Boolean =
             expirationTime.isBefore(now)
 
-    fun retain(): ResponseCacheObject = ResponseCacheObject(
+    fun retain(): ResponseCacheObject = copy(
             answerARecord = answerARecord.retain(),
             expirationTime = expirationTime)
 
