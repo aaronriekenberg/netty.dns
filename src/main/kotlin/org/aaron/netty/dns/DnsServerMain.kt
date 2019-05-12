@@ -118,7 +118,7 @@ private data class ResponseCacheObject(
             expirationTime = expirationTime)
 
     fun release(): Boolean =
-            ReferenceCountUtil.release(answerARecord)
+            answerARecord.release()
 
 }
 
