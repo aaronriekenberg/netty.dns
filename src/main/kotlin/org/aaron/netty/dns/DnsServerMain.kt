@@ -210,7 +210,7 @@ private class IncomingDNSQueryHandler() : SimpleChannelInboundHandler<DatagramDn
                     dnsServerChannel.writeAndFlush(response)
 
                 } finally {
-                    ReferenceCountUtil.release(responseCacheObject)
+                    responseCacheObject.release()
                 }
 
             } else {
